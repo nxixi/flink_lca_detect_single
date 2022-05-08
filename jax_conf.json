@@ -1,0 +1,138 @@
+[
+  {
+    "algClassName": "LcaDetectSingle",
+    "algModuleName": "flink_lca_detect_single.LcaDetectSingle",
+    "display":"日志量异常检测单个模板",
+    "description":"单个模板的日志量异常检测",
+    "algName": "LcaDetectSingle",
+    "type": "streaming",
+    "algProcessType": "stream",
+    "algDataType": "METRIC",
+    "algTrainType": "ONLINE",
+    "algDetectType": "DETECT",
+    "algVersion": "2.0.0",
+    "algAlias": "",
+    "algTrainJob": "",
+    "algTrainDataLength": "",
+
+    "parameters": [
+      {
+        "name": "id_field",
+        "label": "分组ID字段名",
+        "description": "指定分组ID字段名。",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "time_field",
+        "label": "时间字段名",
+        "description": "指定时间字段名。",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "value_field",
+        "label": "值字段名",
+        "description": "指定值字段名。",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "day_start",
+        "label": "开始检测时间阈值",
+        "description": "几天以上开始天周期检测（少于该时长不检测），单位天。",
+        "type": "int",
+        "optional": "true",
+        "defaultValue": 2
+      },
+      {
+        "name": "week_start",
+        "label": "周周期检测时间阈值",
+        "description": "几天以上开始周周期检测，单位天。",
+        "type": "int",
+        "optional": "true",
+        "defaultValue": 14
+      },
+      {
+        "name": "agg",
+        "label": "聚合窗口",
+        "description": "检测聚合窗口，默认5，单位分钟。",
+        "type": "int",
+        "optional": "true",
+        "defaultValue": 5
+      },
+      {
+        "name": "sigma",
+        "label": "灵敏度参数",
+        "description": "灵敏度参数，当异常点过多时，增大该值可以减少异常点；反之增加异常点。默认3",
+        "type": "float",
+        "optional": "true",
+        "defaultValue": 3
+      },
+      {
+        "name": "window",
+        "label": "取数据窗口",
+        "description": "检测异常时，取历史数据中每一段同周期数据的数据窗口，默认1，单位小时。比如窗口为1小时，即取前面几个周期点附近1小时的数据计算异常检测的参考值。",
+        "type": "int",
+        "optional": "true",
+        "defaultValue": 1
+      },
+      {
+        "name": "sparse_period_thresh",
+        "label": "稀疏周期型数据突降异常阈值",
+        "description": "稀疏周期型数据，突降异常连续出现多长时间时才返回异常，默认60，单位分钟。",
+        "type": "int",
+        "optional": "true",
+        "defaultValue": 60
+      },
+      {
+        "name": "continuous_not_period_thresh",
+        "label": "连续非周期型数据异常检测历史参考数据时长",
+        "description": "连续非周期型数据，异常检测时的历史参考数据时长，默认7，单位天。",
+        "type": "int",
+        "optional": "true",
+        "defaultValue": 7
+      },
+      {
+        "name": "his_window",
+        "label": "历史数据时长",
+        "description": "算法模型保存的历史数据时长，默认15，单位天。",
+        "type": "int",
+        "optional": "true",
+        "defaultValue": 15
+      },
+      {
+        "name": "is_thresh",
+        "label": "是否开启固定阈值检测",
+        "description": "是否开启固定阈值检测，默认false。",
+        "type": "bool",
+        "optional": "true",
+        "defaultValue": false
+      },
+      {
+        "name": "is_varis_thresh",
+        "label": "是否开启变化量阈值检测",
+        "description": "是否开启变化量阈值检测，默认false。",
+        "type": "bool",
+        "optional": "true",
+        "defaultValue": false
+      },
+      {
+        "name": "thresh_dict",
+        "label": "固定阈值参数",
+        "description": "固定阈值检测开启时，待检测值需大于突增固定阈值才会被判为突增异常；小于突降固定阈值才会被判为突降异常。",
+        "type": "dict",
+        "optional": "true",
+        "defaultValue": {'upper': float('inf'), 'lower': float('-inf')}
+      },
+      {
+        "name": "varis_thresh_dict",
+        "label": "变化量阈值参数",
+        "description": "变化量阈值检测开启时，待检测值与历史均值的增幅需大于突增变化量阈值才会被判为突增异常；与历史均值的跌幅需大于突降固定阈值才会被判为突降异常。",
+        "type": "dict",
+        "optional": "true",
+        "defaultValue": {'upper': float('inf'), 'lower': float('-inf')}
+      }
+    ]
+  }
+]
