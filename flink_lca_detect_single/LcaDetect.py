@@ -1,10 +1,5 @@
 import numpy as np
-import pandas as pd
 import math
-import sys
-import pickle
-import os
-from datetime import datetime, date
 
 
 class LcaDetect(object):
@@ -14,359 +9,321 @@ class LcaDetect(object):
         id_field = conf_dict.get("id_field")
         time_field = conf_dict.get("time_field")
         value_field = conf_dict.get("value_field")
+        abnormal_type_field = conf_dict.get("abnormal_type_field")
+        value_his_field = conf_dict.get("value_his_field")
         train_res_field = conf_dict.get("train_res_field")
+        detection_config_field = conf_dict.get("detection_config_field")
         day_start = conf_dict.get("day_start", 2)
         week_start = conf_dict.get("week_start", 14)
         agg = conf_dict.get("agg", 5)
-        sigma = conf_dict.get("sigma", 3)
         window = conf_dict.get("window", 1)
         sparse_period_thresh = conf_dict.get("sparse_period_thresh", 60)
         continuous_not_period_thresh = conf_dict.get("continuous_not_period_thresh", 7)
         his_window = conf_dict.get("his_window", 15)
-        is_thresh = conf_dict.get("is_thresh", False)
-        is_varis_thresh = conf_dict.get("is_varis_thresh", False)
-        thresh_dict = conf_dict.get("thresh_dict", {'upper': float('inf'), 'lower': float('-inf')})
-        varis_thresh_dict = conf_dict.get("varis_thresh_dict", {'upper': float('inf'), 'lower': float('-inf')})
 
-        lca_detect = LcaDetect(id_field, time_field, value_field, train_res_field, day_start=day_start,
-                               week_start=week_start, agg=agg, sigma=sigma, window=window,
-                               sparse_period_thresh=sparse_period_thresh,
-                               continuous_not_period_thresh=continuous_not_period_thresh, his_window=his_window,
-                               is_thresh=is_thresh, is_varis_thresh=is_varis_thresh, thresh_dict=thresh_dict,
-                               varis_thresh_dict=varis_thresh_dict)
+        lca_detect = LcaDetect(id_field, time_field, value_field, abnormal_type_field, value_his_field, train_res_field,
+                               detection_config_field, day_start=day_start, week_start=week_start, agg=agg,
+                               window=window, sparse_period_thresh=sparse_period_thresh,
+                               continuous_not_period_thresh=continuous_not_period_thresh, his_window=his_window)
 
         return lca_detect
 
-    def __init__(self, id_field, time_field, value_field, train_res_field, day_start=2, week_start=14, agg=5, sigma=3,
-                 window=1, sparse_period_thresh=60, continuous_not_period_thresh=7, his_window=15, is_thresh=False,
-                 is_varis_thresh=False, thresh_dict={'upper': float('inf'), 'lower': float('-inf')},
-                 varis_thresh_dict={'upper': float('inf'), 'lower': float('-inf')}):
+    def __init__(self, id_field, time_field, value_field, abnormal_type_field, value_his_field, train_res_field,
+                 detection_config_field, day_start=2, week_start=14, agg=5, window=1, sparse_period_thresh=60,
+                 continuous_not_period_thresh=7, his_window=15):
         self.id_field = id_field
         self.time_field = time_field
         self.value_field = value_field
+        self.abnormal_type_field = abnormal_type_field
+        self.value_his_field = value_his_field
         self.train_res_field = train_res_field
+        self.detection_config_field = detection_config_field
         self.day_start = day_start  # 几天以上开始天周期的检测
         self.week_start = week_start  # 几天以上开始周周期的检测
         self.agg = agg  # 检测窗口，单位分钟
-        self.sigma = sigma
         self.window = window  #
         self.sparse_period_thresh = sparse_period_thresh
         self.continuous_not_period_thresh = continuous_not_period_thresh
         self.his_window = his_window
-        self.start_time = None  # str
-        self.last_time = None
-        self.is_start_detect = False
-        # self.last_data_day = None
-        self.detect_mode = 'day'
-        self.list_len_one_hour = int(60 / self.agg)  # 一小时有多少个点
-        self.is_thresh = is_thresh  # 是否开启固定阈值检测
-        self.is_varis_thresh = is_varis_thresh  # 是否开启变化量阈值检测
-        self.thresh_dict = thresh_dict  # 固定阈值检测时突增突降阈值
-        self.varis_thresh_dict = varis_thresh_dict  # 变化量阈值检测时突增突降变化量阈值
 
-        self.value_his = []  # 存储该模板过去14天数据
-        self.is_sparse = False  # 该模板数据是否稀疏
-        self.is_period = False  # 该模板数据是否周期
-        self.per_cor = None  # 该模板周期长度
-        self.per_coef = None  #
+        self.list_len_one_hour = int(60 / self.agg)  # 一小时有多少个点
+        self.model = dict()  # 当前点的模型
         self.recent_sparse_period = []  # 最近sparse_period_thresh时间内稀疏周期突降异常的时间
 
-        self.is_upper_anomaly = False
-        self.is_lower_anomaly = False
+        self.is_alg_upper_anomaly = False
+        self.is_alg_lower_anomaly = False
+        self.is_thresh_upper_anomaly = False
+        self.is_thresh_lower_anomaly = False
+        self.is_change_upper_anomaly = False
+        self.is_change_lower_anomaly = False
         self.anomaly_type = ''
 
-    # 稀疏周期型
-    def detect_sparse_period(self, value):
-        cor = self.per_cor
-        sta_mean = []
-        sta_std = []
+    # 稀疏周期型计算均值、标准差
+    def cal_statistic_sparse_period(self, value_his, per_cor, is_cal_std):
+        v_lis_list = []
         trans_window = self.list_len_one_hour * self.window // 2
-        for i in range(1, len(self.value_his) // cor + 1):
+        for i in range(1, len(value_his) // per_cor + 1):
             if i <= 4:
                 try:
-                    v_lis = [j for j in self.value_his[-cor * i - trans_window:-cor * i + trans_window] if j > 0]
+                    v_lis = [j for j in value_his[-per_cor * i - trans_window:-per_cor * i + trans_window] if j > 0]
                 except:
-                    v_lis = [j for j in self.value_his[:-cor * i + trans_window] if j > 0]
+                    v_lis = [j for j in value_his[:-per_cor * i + trans_window] if j > 0]
                 v_lis = v_lis if v_lis else [0]
-                sta_mean.append(np.mean(v_lis))
-                sta_std.append(np.std(v_lis))
-        mean_v = np.median(sta_mean)
-        if self.is_varis_thresh:  # 开启变化量阈值检验
-            varis = value - mean_v
-            if varis < 0 and abs(varis) > self.varis_thresh_dict['lower']:  # 下降量超过突降的变化量阈值
-                if (not self.is_thresh) or (self.is_thresh and value < self.thresh_dict['lower']):  # 固定阈值检测
-                    std_v = np.median(sta_std)
-                    lower = mean_v - self.sigma * std_v
-                    if value < lower:
-                        self.is_lower_anomaly = True
-                        self.anomaly_type = 'sparse_period_lower'
-            elif varis > 0 and varis > self.varis_thresh_dict['upper']:  # 增长量超过突增的变化量阈值
-                if (not self.is_thresh) or (self.is_thresh and value > self.thresh_dict['upper']):  # 固定阈值检测
-                    std_v = np.median(sta_std)
-                    upper = mean_v + self.sigma * std_v
-                    if value > upper:
-                        self.is_upper_anomaly = True
-                        self.anomaly_type = 'sparse_period_upper'
+                v_lis_list.append(v_lis)
+        mean_v = np.median([sum(i)/len(i) for i in v_lis_list])
+        if is_cal_std:
+            std_v = np.median([np.std(i) for i in v_lis_list])
+            return mean_v, std_v
+        return mean_v, None
+
+    # 稀疏非周期型计算均值、标准差
+    def cal_statistic_sparse_not_period(self, value_his, is_cal_std):
+        dat = [i for i in value_his if i > 0]
+        dat = dat if dat else [0]
+        mean_v = sum(dat)/len(dat)
+        if is_cal_std:
+            std_v = np.std(dat)
+            return mean_v, std_v
+        return mean_v, None
+
+    # 连续(非稀疏)周期型计算均值、标准差
+    def cal_statistic_not_sparse_period(self, value_his, per_coef, detect_mode, is_cal_std):
+        trans_window = self.list_len_one_hour * self.window // 2
+        length = math.ceil(per_coef * trans_window)
+        v_lis_list = []
+        if detect_mode == 'day':
+            v_lis_list.append(value_his[-self.list_len_one_hour * 24 - length:-self.list_len_one_hour * 24 + length + 1])
+            v_lis_list.append(value_his[-self.list_len_one_hour * 48 - length:-self.list_len_one_hour * 48 + length + 1])
+            days = len(value_his) // (self.list_len_one_hour * 24)
+            if 3 <= days < 4:
+                v_lis_list.append(value_his[-self.list_len_one_hour * 72 - length:-self.list_len_one_hour * 72 + length + 1])
+            elif days >= 4:
+                v_lis_list.append(value_his[-self.list_len_one_hour * 72 - length:-self.list_len_one_hour * 72 + length + 1])
+                v_lis_list.append(value_his[-self.list_len_one_hour * 96 - length:-self.list_len_one_hour * 96 + length + 1])
         else:
-            if self.is_thresh and value < self.thresh_dict['lower']:  # 固定阈值检测
-                std_v = np.median(sta_std)
-                lower = mean_v - self.sigma * std_v
-                if value < lower:
-                    self.is_lower_anomaly = True
-                    self.anomaly_type = 'sparse_period_lower'
-            elif self.is_thresh and value > self.thresh_dict['upper']:  # 固定阈值检测
-                std_v = np.median(sta_std)
-                upper = mean_v + self.sigma * std_v
-                if value > upper:
-                    self.is_upper_anomaly = True
-                    self.anomaly_type = 'sparse_period_upper'
-            elif not self.is_thresh:
-                std_v = np.median(sta_std)
-                lower = mean_v - self.sigma * std_v
-                upper = mean_v + self.sigma * std_v
-                if value < lower:
-                    self.is_lower_anomaly = True
-                    self.anomaly_type = 'sparse_period_lower'
-                if value > upper:
-                    self.is_upper_anomaly = True
-                    self.anomaly_type = 'sparse_period_upper'
+            v_lis_list.append(value_his[-self.list_len_one_hour * 24 - length:-self.list_len_one_hour * 24 + length + 1])
+            v_lis_list.append(value_his[-self.list_len_one_hour * 48 - length:-self.list_len_one_hour * 48 + length + 1])
+            v_lis_list.append(value_his[-self.list_len_one_hour * 168 - length:-self.list_len_one_hour * 168 + length + 1])
+            v_lis_list.append(value_his[-self.list_len_one_hour * 336 - length:-self.list_len_one_hour * 336 + length + 1])
+        mean = np.median([sum(i)/len(i) for i in v_lis_list])
+        if is_cal_std:
+            std = np.median([np.std(i) for i in v_lis_list])
+            return mean, std
+        return mean, None
+
+    # 连续(非稀疏)非周期型计算均值、标准差
+    def cal_statistic_not_sparse_not_period(self, value_his, is_cal_std):
+        value_his_ = value_his[-self.list_len_one_hour * 24 * self.continuous_not_period_thresh:]
+        dat = [i for i in value_his_ if i > 0]
+        dat = dat if dat else [0]
+        mean_v = sum(dat)/len(dat)
+        if is_cal_std:
+            std_v = np.std(dat)
+            return mean_v, std_v
+        return mean_v, None
+
+    # 计算均值、标准差
+    def cal_statistic(self, value_his, is_sparse, is_period, per_cor, per_coef, detect_mode, is_cal_std):
+        if is_sparse:  # 稀疏
+            if is_period:  # 周期
+                mean_v, std_v = self.cal_statistic_sparse_period(value_his, per_cor, is_cal_std)
+            else:  # 非周期
+                mean_v, std_v = self.cal_statistic_sparse_not_period(value_his, is_cal_std)
+        else:  # 连续
+            if is_period:  # 周期
+                mean_v, std_v = self.cal_statistic_not_sparse_period(value_his, per_coef, detect_mode, is_cal_std)
+            else:  # 非周期
+                mean_v, std_v = self.cal_statistic_not_sparse_not_period(value_his, is_cal_std)
+        return mean_v, std_v
+
+    # 稀疏周期型
+    def detect_sparse_period(self, value, mean_v, std_v, up_alg_enable, up_sigma, down_alg_enable, down_sigma):
+        if up_alg_enable:
+            upper = mean_v + up_sigma * std_v
+            if value > upper:
+                self.is_alg_upper_anomaly = True
+                self.anomaly_type = 'sparse_period_upper'
+        if down_alg_enable:
+            lower = mean_v - down_sigma * std_v
+            if value < lower:
+                self.is_alg_lower_anomaly = True
+                self.anomaly_type = 'sparse_period_lower'
 
     # 稀疏非周期型
-    def sparse_not_period(self, value):
-        dat = [i for i in self.value_his if i > 0]
-        dat = dat if dat else [0]
-        mean_v = np.mean(dat)
-        if self.is_varis_thresh:
-            varis = value - mean_v
-            if varis > 0 and varis > self.varis_thresh_dict['upper']:  # 增长量超过突增的变化量阈值
-                if (not self.is_thresh) or (self.is_thresh and value > self.thresh_dict['upper']):  # 固定阈值检测
-                    std_v = np.std(dat)
-                    cv = std_v / mean_v
-                    upper = mean_v + self.sigma * (1 + cv) * std_v
-                    if value > upper:
-                        self.is_upper_anomaly = True
-                        self.anomaly_type = 'sparse_not_period_upper'
-        else:
-            if (not self.is_thresh) or (self.is_thresh and value > self.thresh_dict['upper']):  # 固定阈值检测
-                std_v = np.std(dat)
-                cv = std_v / mean_v
-                upper = mean_v + self.sigma * (1 + cv) * std_v
-                if value > upper:
-                    self.is_upper_anomaly = True
-                    self.anomaly_type = 'sparse_not_period_upper'
+    def sparse_not_period(self, value, mean_v, std_v, up_alg_enable, up_sigma):
+        if up_alg_enable:
+            cv = std_v / mean_v
+            upper = mean_v + up_sigma * (1 + cv) * std_v
+            if value > upper:
+                self.is_alg_upper_anomaly = True
+                self.anomaly_type = 'sparse_not_period_upper'
 
     # 连续(非稀疏)周期型
-    def detect_not_sparse_period(self, value):
-        trans_window = self.list_len_one_hour * self.window // 2
-        length = math.ceil(self.per_coef * trans_window)
-        if self.detect_mode == 'day':
-            mean1 = np.mean(
-                self.value_his[
-                -self.list_len_one_hour * 24 - length:-self.list_len_one_hour * 24 + length + 1])  # 。。。。。。。。。
-            mean2 = np.mean(
-                self.value_his[-self.list_len_one_hour * 48 - length:-self.list_len_one_hour * 48 + length + 1])
-            std1 = np.std(
-                self.value_his[-self.list_len_one_hour * 24 - length:-self.list_len_one_hour * 24 + length + 1])
-            std2 = np.std(
-                self.value_his[-self.list_len_one_hour * 48 - length:-self.list_len_one_hour * 48 + length + 1])
-            days = len(self.value_his) // (self.list_len_one_hour * 24)
-            if 2 <= days < 3:
-                mean = np.median([mean1, mean2])
-                std = np.median([std1, std2])
-            elif 3 <= days < 4:
-                mean3 = np.mean(self.value_his[
-                                -self.list_len_one_hour * 72 - length:-self.list_len_one_hour * 72 + length + 1])
-                std3 = np.std(self.value_his[
-                              -self.list_len_one_hour * 72 - length:-self.list_len_one_hour * 72 + length + 1])
-                mean = np.median([mean1, mean2, mean3])
-                std = np.median([std1, std2, std3])
-            else:
-                mean3 = np.mean(self.value_his[
-                                -self.list_len_one_hour * 72 - length:-self.list_len_one_hour * 72 + length + 1])
-                std3 = np.std(self.value_his[
-                              -self.list_len_one_hour * 72 - length:-self.list_len_one_hour * 72 + length + 1])
-                mean4 = np.mean(self.value_his[
-                                -self.list_len_one_hour * 96 - length:-self.list_len_one_hour * 96 + length + 1])
-                std4 = np.std(self.value_his[
-                              -self.list_len_one_hour * 96 - length:-self.list_len_one_hour * 96 + length + 1])
-                mean = np.median([mean1, mean2, mean3, mean4])
-                std = np.median([std1, std2, std3, std4])
-        else:
-            mean1 = np.mean(
-                self.value_his[-self.list_len_one_hour * 24 - length:-self.list_len_one_hour * 24 + length + 1])
-            mean2 = np.mean(
-                self.value_his[-self.list_len_one_hour * 48 - length:-self.list_len_one_hour * 48 + length + 1])
-            mean3 = np.mean(self.value_his[
-                            -self.list_len_one_hour * 168 - length:-self.list_len_one_hour * 168 + length + 1])
-            mean4 = np.mean(self.value_his[
-                            -self.list_len_one_hour * 336 - length:-self.list_len_one_hour * 336 + length + 1])
-            mean = np.median([mean1, mean2, mean3, mean4])
-            std1 = np.std(
-                self.value_his[-self.list_len_one_hour * 24 - length:-self.list_len_one_hour * 24 + length + 1])
-            std2 = np.std(
-                self.value_his[-self.list_len_one_hour * 48 - length:-self.list_len_one_hour * 48 + length + 1])
-            std3 = np.std(self.value_his[
-                          -self.list_len_one_hour * 168 - length:-self.list_len_one_hour * 168 + length + 1])
-            std4 = np.std(self.value_his[
-                          -self.list_len_one_hour * 336 - length:-self.list_len_one_hour * 336 + length + 1])
-            std = np.median([std1, std2, std3, std4])
-        if self.is_varis_thresh:  # 开启变化量阈值检验
-            varis = value - mean
-            if varis < 0 and abs(varis) > self.varis_thresh_dict['lower']:  # 下降量超过突降的变化量阈值
-                if (not self.is_thresh) or (self.is_thresh and value < self.thresh_dict['lower']):  # 固定阈值检测
-                    lower = mean - self.sigma * std
-                    if value < lower:
-                        self.is_lower_anomaly = True
-                        self.anomaly_type = 'continuous_period_lower'
-            elif varis > 0 and varis > self.varis_thresh_dict['upper']:  # 增长量超过突增的变化量阈值
-                if (not self.is_thresh) or (self.is_thresh and value > self.thresh_dict['upper']):  # 固定阈值检测
-                    upper = mean + self.sigma * std
-                    if value > upper:
-                        self.is_upper_anomaly = True
-                        self.anomaly_type = 'continuous_period_upper'
-        else:
-            if self.is_thresh and value > self.thresh_dict['upper']:  # 固定阈值检测
-                upper = mean + self.sigma * std
-                if value > upper:
-                    self.is_upper_anomaly = True
-                    self.anomaly_type = 'continuous_period_upper'
-            elif self.is_thresh and value < self.thresh_dict['lower']:  # 固定阈值检测
-                lower = mean - self.sigma * std
-                if value < lower:
-                    self.is_lower_anomaly = True
-                    self.anomaly_type = 'continuous_period_lower'
-            if not self.is_thresh:
-                upper = mean + self.sigma * std
-                lower = mean - self.sigma * std
-                if value > upper:
-                    self.is_upper_anomaly = True
-                    self.anomaly_type = 'continuous_period_upper'
-                if value < lower:
-                    self.is_lower_anomaly = True
-                    self.anomaly_type = 'continuous_period_lower'
+    def detect_not_sparse_period(self, value, mean_v, std_v, up_alg_enable, up_sigma, down_alg_enable, down_sigma):
+        if up_alg_enable:
+            upper = mean_v + up_sigma * std_v
+            if value > upper:
+                self.is_alg_upper_anomaly = True
+                self.anomaly_type = 'continuous_period_upper'
+        if down_alg_enable:
+            lower = mean_v - down_sigma * std_v
+            if value < lower:
+                self.is_alg_lower_anomaly = True
+                self.anomaly_type = 'continuous_period_lower'
 
     # 连续(非稀疏)非周期型
-    def detect_not_sparse_not_period(self, value):
-        dat = [i for i in self.value_his[-self.list_len_one_hour * 24 * self.continuous_not_period_thresh:] if
-               i > 0]
-        dat = dat if dat else [0]
-        mean_v = np.mean(dat)
-        if self.is_varis_thresh:  # 开启变化量阈值检验
-            varis = value - mean_v
-            if varis < 0 and abs(varis) > self.varis_thresh_dict['lower']:  # 下降量超过突降的变化量阈值
-                if (not self.is_thresh) or (self.is_thresh and value < self.thresh_dict['lower']):  # 固定阈值检测
-                    std_v = np.std(dat)
-                    cv = std_v / mean_v
-                    lower = mean_v - self.sigma * (1 + cv) * std_v
-                    if value < lower:
-                        self.is_lower_anomaly = True
-                        self.anomaly_type = 'continuous_not_period_lower'
-            elif varis > 0 and varis > self.varis_thresh_dict['upper']:  # 增长量超过突增的变化量阈值
-                if (not self.is_thresh) or (self.is_thresh and value > self.thresh_dict['upper']):  # 固定阈值检测
-                    std_v = np.std(dat)
-                    cv = std_v / mean_v
-                    upper = mean_v + self.sigma * (1 + cv) * std_v
-                    if value > upper:
-                        self.is_upper_anomaly = True
-                        self.anomaly_type = 'continuous_not_period_upper'
-        else:
-            if self.is_thresh and value > self.thresh_dict['upper']:  # 固定阈值检测
-                std_v = np.std(dat)
-                cv = std_v / mean_v
-                upper = mean_v + self.sigma * (1 + cv) * std_v
-                if value > upper:
-                    self.is_upper_anomaly = True
-                    self.anomaly_type = 'continuous_not_period_upper'
-            elif self.is_thresh and value < self.thresh_dict['lower']:  # 固定阈值检测
-                std_v = np.std(dat)
-                cv = std_v / mean_v
-                lower = mean_v - self.sigma * (1 + cv) * std_v
-                if value < lower:
-                    self.is_lower_anomaly = True
-                    self.anomaly_type = 'continuous_not_period_lower'
-            elif not self.is_thresh:
-                std_v = np.std(dat)
-                cv = std_v / mean_v
-                upper = mean_v + self.sigma * (1 + cv) * std_v
-                lower = mean_v - self.sigma * (1 + cv) * std_v
-                if value > upper:
-                    self.is_upper_anomaly = True
-                    self.anomaly_type = 'continuous_not_period_upper'
-                if value < lower:
-                    self.is_lower_anomaly = True
-                    self.anomaly_type = 'continuous_not_period_lower'
+    def detect_not_sparse_not_period(self, value, mean_v, std_v, up_alg_enable, up_sigma, down_alg_enable, down_sigma):
+        cv = std_v / mean_v
+        if up_alg_enable:
+            upper = mean_v + up_sigma * (1 + cv) * std_v
+            if value > upper:
+                self.is_alg_upper_anomaly = True
+                self.anomaly_type = 'continuous_not_period_upper'
+        if down_alg_enable:
+            lower = mean_v - down_sigma * (1 + cv) * std_v
+            if value < lower:
+                self.is_alg_lower_anomaly = True
+                self.anomaly_type = 'continuous_not_period_lower'
 
-    def detect(self, value):
-        self.is_upper_anomaly = False
-        self.is_lower_anomaly = False
-        self.anomaly_type = ''
-        # 固定阈值检测
-        if self.is_thresh and self.thresh_dict['lower'] < value < self.thresh_dict['upper']:
-            sys.exit()
-        # 稀疏
-        if self.is_sparse:
-            # 周期
-            if self.is_period:
-                self.detect_sparse_period(value)
-            # 非周期
-            else:
-                self.sparse_not_period(value)
-        # 连续
-        else:
-            if self.is_period:
-                self.detect_not_sparse_period(value)
-            else:
-                self.detect_not_sparse_not_period(value)
+    # 算法检测
+    def alg_detect(self, value, value_his, is_sparse, is_period, per_cor, per_coef, detect_mode,
+                   up_alg_enable, up_sigma, down_alg_enable, down_sigma):
+        mean_v, std_v = self.cal_statistic(value_his, is_sparse, is_period, per_cor, per_coef, detect_mode, is_cal_std=True)
+        if is_sparse:  # 稀疏
+            if is_period:  # 周期
+                self.detect_sparse_period(value, mean_v, std_v, up_alg_enable, up_sigma, down_alg_enable, down_sigma)
+            else:   # 非周期
+                self.sparse_not_period(value, mean_v, std_v, up_alg_enable, up_sigma)
+        else:   # 连续
+            if is_period:  # 周期
+                self.detect_not_sparse_period(value, mean_v, std_v, up_alg_enable, up_sigma, down_alg_enable, down_sigma)
+            else:   # 非周期
+                self.detect_not_sparse_not_period(value, mean_v, std_v, up_alg_enable, up_sigma, down_alg_enable, down_sigma)
+        return mean_v, std_v
+
+    # 固定阈值检测
+    def thresh_detect(self, value, up_thresh_enable, up_thresh, down_thresh_enable, down_thresh):
+        if up_thresh_enable and value > up_thresh:
+            self.is_thresh_upper_anomaly = True
+        if down_thresh_enable and value < down_thresh:
+            self.is_thresh_lower_anomaly = True
+
+    # 变化量阈值检测
+    def change_detect(self, value, value_his, up_change_enable, up_change_thresh, down_change_enable, down_change_thresh,
+                      mean_v, is_sparse, is_period, per_cor, per_coef, detect_mode):
+        if mean_v is None:
+            mean_v, std_v = self.cal_statistic(value_his, is_sparse, is_period, per_cor, per_coef, detect_mode, is_cal_std=False)
+        varis = value - mean_v
+        if up_change_enable and varis > 0 and varis > up_change_thresh:  # 增长量超过突增的变化量阈值
+            self.is_change_upper_anomaly = True
+        elif down_change_enable and varis < 0 and abs(varis) > down_change_thresh:  # 下降量超过突降的变化量阈值
+            self.is_change_lower_anomaly = True
 
     def run(self, data):
         timestamp = int(data[self.time_field])   # 毫秒
         value = int(data[self.value_field])
-        template_id = str(data[self.id_field])
+        value_his = data[self.value_his_field]   # 长度从0~288*15
         train_res = data[self.train_res_field]
+        detection_config = data[self.detection_config_field]
+        # 参数
+        up_alg_enable = detection_config['up_alg_enable']
+        up_thresh_enable = detection_config['up_thresh_enable']
+        up_change_enable = detection_config['up_change_enable'] if 'up_change_enable' in detection_config else False
+        up_sigma = detection_config['up_sigma']
+        up_thresh = detection_config['up_thresh']
+        up_change_thresh = detection_config['up_change_thresh'] if 'up_change_thresh' in detection_config else 0
+        down_alg_enable = detection_config['down_alg_enable']
+        down_thresh_enable = detection_config['down_thresh_enable']
+        down_change_enable = detection_config['down_change_enable'] if 'down_change_enable' in detection_config else False
+        down_sigma = detection_config['down_sigma']
+        down_thresh = detection_config['down_thresh']
+        down_change_thresh = detection_config['down_change_thresh'] if 'down_change_thresh' in detection_config else 0
 
-        # 读取稀疏性、周期性
-        self.is_sparse = train_res[template_id]['is_sparse']  # 该模板数据是否稀疏
-        self.is_period = train_res[template_id]['is_period']  # 该模板数据是否周期
-        self.per_cor = train_res[template_id]['per_cor']  # 该模板周期长度
-        self.per_coef = train_res[template_id]['per_coef']  #
+        self.is_alg_upper_anomaly = False
+        self.is_alg_lower_anomaly = False
+        self.is_thresh_upper_anomaly = False
+        self.is_thresh_lower_anomaly = False
+        self.is_change_upper_anomaly = False
+        self.is_change_lower_anomaly = False
+        self.anomaly_type = ''
 
-        if not self.start_time:
-            self.start_time = timestamp
-        else:
-            millseconds = timestamp - self.start_time
-            day_start_sec = self.day_start * 86400000
-            week_start_sec = self.week_start * 86400000
-            if not self.is_start_detect:
-                # 2天以上历史数据才检测
-                if millseconds >= day_start_sec:
-                    self.is_start_detect = True
-            if day_start_sec <= millseconds < week_start_sec:
-                self.detect_mode = 'day'
-            elif millseconds >= week_start_sec:
-                self.detect_mode = 'week'
+        # 【开启固定阈值检测】
+        if up_thresh_enable or down_thresh_enable:
+            self.thresh_detect(value, up_thresh_enable, up_thresh, down_thresh_enable, down_thresh)
+        mean_v = None
+        day_start_len = self.list_len_one_hour * 24 * self.day_start
+        week_start_len = self.list_len_one_hour * 24 * self.week_start
+        lens = len(value_his)
+        if lens >= day_start_len:
+            # 稀疏性、周期性
+            is_sparse = train_res['is_sparse']  # 该模板数据是否稀疏
+            is_period = train_res['is_period']  # 该模板数据是否周期
+            per_cor = train_res['per_cor']  # 该模板周期长度
+            per_coef = train_res['per_coef']  #
+            # 模式：天/周
+            if day_start_len <= lens < week_start_len:
+                detect_mode = 'day'
+            else:
+                detect_mode = 'week'
+            # 【开启算法检测】
+            if up_alg_enable or down_alg_enable:
+                # 异常检测
+                mean_v, std_v = self.alg_detect(value, value_his, is_sparse, is_period, per_cor, per_coef, detect_mode,
+                                                up_alg_enable, up_sigma, down_alg_enable, down_sigma)
+                # 过滤非连续的稀疏周期突降异常
+                if self.anomaly_type == 'sparse_period_lower':
+                    self.recent_sparse_period.append(timestamp)
+                    cri_time = self.sparse_period_thresh * 60000
+                    self.recent_sparse_period = [i for i in self.recent_sparse_period if (timestamp - i) < cri_time]
+                    sparse_period_thresh_his = value_his[-self.sparse_period_thresh // self.agg:]
+                    if len(self.recent_sparse_period) != sum([1 for i in sparse_period_thresh_his if i > 0]):
+                        self.is_alg_lower_anomaly = False
+                        self.anomaly_type = ''
+            # 【开启变化量阈值检测】
+            if up_change_enable or down_change_enable:
+                self.change_detect(value, value_his, up_change_enable, up_change_thresh, down_change_enable,
+                                   down_change_thresh, mean_v, is_sparse, is_period, per_cor, per_coef, detect_mode)
 
-        # 保存最多最近 his_window天 数据
-        if self.last_time:
-            self.value_his += [0] * (int((timestamp - self.last_time) // (self.agg * 60000)) - 1)
-        self.value_his = self.value_his[-min(self.list_len_one_hour * 24 * self.his_window, len(self.value_his)):]
+        # 综合3种检测结果
+        is_upper_anomaly, is_lower_anomaly = True, True
+        if (up_alg_enable and not self.is_alg_upper_anomaly) or \
+                (up_thresh_enable and not self.is_thresh_upper_anomaly) or \
+                (up_change_enable and not self.is_change_upper_anomaly) or \
+                ((not up_alg_enable) and (not up_thresh_enable) and (not up_change_enable)):
+            is_upper_anomaly = False
+        if (down_alg_enable and not self.is_alg_lower_anomaly) or \
+                (down_thresh_enable and not self.is_thresh_lower_anomaly) or \
+                (down_change_enable and not self.is_change_lower_anomaly) or \
+                ((not down_alg_enable) and (not down_thresh_enable) and (not down_change_enable)):
+            is_lower_anomaly = False
+        # 异常类型
+        if is_upper_anomaly:
+            data['abnormal_type'] = 1
+        elif is_lower_anomaly:
+            data['abnormal_type'] = 2
 
-        # 异常检测
-        if self.is_start_detect:
-            self.detect(value)
-            # 过滤非连续的稀疏周期突降异常
-            if self.anomaly_type == 'sparse_period_lower':
-                self.recent_sparse_period.append(timestamp)
-                cri_time = self.sparse_period_thresh * 60000
-                self.recent_sparse_period = [i for i in self.recent_sparse_period if (timestamp - i) < cri_time]
-                sparse_period_thresh_his = self.value_his[-self.sparse_period_thresh // self.agg:]
-                if len(self.recent_sparse_period) != sum([1 for i in sparse_period_thresh_his if i > 0]):
-                    self.is_lower_anomaly = False
-                    self.anomaly_type = ''
+        # 非突增突降
+        if (not is_upper_anomaly) and (not is_lower_anomaly):
+            # 判断是否偶发
+            if train_res['is_accidental']:
+                data['abnormal_type'] = 7
 
-        self.value_his.append(value)
-        self.last_time = timestamp
+        data['result'] = {'is_upper_anomaly': is_upper_anomaly,
+                          'is_lower_anomaly': is_lower_anomaly,
+                          'anomaly_type': self.anomaly_type if (is_upper_anomaly or is_lower_anomaly) else ''}
+        self.update_model()
 
-        data['result'] = {'is_upper_anomaly': self.is_upper_anomaly,
-                          'is_lower_anomaly': self.is_lower_anomaly,
-                          'anomaly_type': self.anomaly_type}
         return data
+
+    def update_model(self):  # 模型更新
+        self.model['recent_sparse_period'] = self.recent_sparse_period
+
+    def load_state(self, dict):
+        model = dict["model"]
+        self.recent_sparse_period = model.get("recent_sparse_period")
+        self.model = model
+
+    def save_state(self):
+        return {
+            "model": self.model
+        }

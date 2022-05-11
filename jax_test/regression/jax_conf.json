@@ -1,0 +1,49 @@
+[
+  {
+    "algClassName": "Regression",
+    "algModuleName": "regression.Regression",
+    "display":"二元回归算子",
+    "description":"对两个变量进行回归分析",
+    "type": "batch",
+    "parameters": [
+      {
+        "name": "X",
+        "label": "自变量字段",
+        "description": "指定自变量字段名",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "Y",
+        "label": "因变量字段",
+        "description": "指定因变量字段名",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "poly_n",
+        "label": "拟合项数",
+        "description": "多项式拟合项数,为1时代表线性回归",
+        "type": "int",
+        "optional": "true",
+        "defaultValue": 1
+      },
+      {
+        "name": "assign_x",
+        "label": "指定自变量值",
+        "description": "通过指定的自变量预测因变量,默认-1.0不指定",
+        "type": "float",
+        "optional": "true",
+        "defaultValue": -1.0
+      },
+      {
+        "name": "assign_y",
+        "label": "指定因变量值",
+        "description": "通过指定的因变量预测自变量,默认-1.0不指定",
+        "type": "float",
+        "optional": "true",
+        "defaultValue": -1.0
+      }
+    ]
+  }
+]

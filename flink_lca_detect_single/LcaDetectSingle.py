@@ -18,7 +18,7 @@ class LcaDetectSingle(RealtimeAnomalyDetect):
 		self.lca_detect = LcaDetect.from_map(config)
 		self.config = config
 
-	def score(self, record, key=None):
+	def transform(self, record, key=None):
 
 		if key is None:
 			key = 'None'

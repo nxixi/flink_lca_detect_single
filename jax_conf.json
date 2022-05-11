@@ -2,8 +2,8 @@
   {
     "algClassName": "LcaDetectSingle",
     "algModuleName": "flink_lca_detect_single.LcaDetectSingle",
-    "display":"日志量异常检测单个模板",
-    "description":"单个模板的日志量异常检测",
+    "display":"日志量异常检测单个模板算子",
+    "description":"单个模板的日志量异常检测算子",
     "algName": "LcaDetectSingle",
     "type": "streaming",
     "algProcessType": "stream",
@@ -38,6 +38,34 @@
         "optional": "false"
       },
       {
+        "name": "abnormal_type_field",
+        "label": "异常类型字段名",
+        "description": "异常类型字段名。",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "value_his_field",
+        "label": "历史数据字段名",
+        "description": "历史数据字段名。",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "train_res_field",
+        "label": "训练结果字段名",
+        "description": "训练结果字段名。",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "detection_config_field",
+        "label": "配置参数字段名",
+        "description": "配置参数字段名。",
+        "type": "string",
+        "optional": "false"
+      },
+      {
         "name": "day_start",
         "label": "开始检测时间阈值",
         "description": "几天以上开始天周期检测（少于该时长不检测），单位天。",
@@ -60,14 +88,6 @@
         "type": "int",
         "optional": "true",
         "defaultValue": 5
-      },
-      {
-        "name": "sigma",
-        "label": "灵敏度参数",
-        "description": "灵敏度参数，当异常点过多时，增大该值可以减少异常点；反之增加异常点。默认3",
-        "type": "float",
-        "optional": "true",
-        "defaultValue": 3
       },
       {
         "name": "window",
@@ -100,38 +120,6 @@
         "type": "int",
         "optional": "true",
         "defaultValue": 15
-      },
-      {
-        "name": "is_thresh",
-        "label": "是否开启固定阈值检测",
-        "description": "是否开启固定阈值检测，默认false。",
-        "type": "bool",
-        "optional": "true",
-        "defaultValue": false
-      },
-      {
-        "name": "is_varis_thresh",
-        "label": "是否开启变化量阈值检测",
-        "description": "是否开启变化量阈值检测，默认false。",
-        "type": "bool",
-        "optional": "true",
-        "defaultValue": false
-      },
-      {
-        "name": "thresh_dict",
-        "label": "固定阈值参数",
-        "description": "固定阈值检测开启时，待检测值需大于突增固定阈值才会被判为突增异常；小于突降固定阈值才会被判为突降异常。",
-        "type": "dict",
-        "optional": "true",
-        "defaultValue": {'upper': float('inf'), 'lower': float('-inf')}
-      },
-      {
-        "name": "varis_thresh_dict",
-        "label": "变化量阈值参数",
-        "description": "变化量阈值检测开启时，待检测值与历史均值的增幅需大于突增变化量阈值才会被判为突增异常；与历史均值的跌幅需大于突降固定阈值才会被判为突降异常。",
-        "type": "dict",
-        "optional": "true",
-        "defaultValue": {'upper': float('inf'), 'lower': float('-inf')}
       }
     ]
   }

@@ -1,0 +1,62 @@
+[
+  {
+    "algClassName": "MovingAvg",
+    "algModuleName": "jax_python_sample.flink_sample",
+    "display":"测试flink python算子(MovingAvg)",
+    "description":"测试flink python算子(MovingAvg)",
+    "type": "streaming",
+    "parameters": [
+      {
+        "name": "timestampField",
+        "label": "时间字段",
+        "description": "指定时间字段名",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "valueField",
+        "label": "值字段名",
+        "description": "指定值字段名, 值字段对应的数据应该是浮点数",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "std",
+        "label": "标准差",
+        "description": "超过平均值上下std的视为异常",
+        "type": "float",
+        "optional": "false"
+      }
+    ]
+  },
+  {
+    "algClassName": "TotalAvg",
+    "algModuleName": "jax_python_sample.spark_sample",
+    "display":"测试spark python算子(TotalAvg)",
+    "description":"测试spark python算子(TotalAvg)",
+    "type": "batch",
+    "parameters": [
+      {
+        "name": "timestampField",
+        "label": "时间字段",
+        "description": "指定时间字段名",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "valueField",
+        "label": "值字段名",
+        "description": "指定值字段名, 值字段对应的数据应该是浮点数",
+        "type": "string",
+        "optional": "false"
+      },
+      {
+        "name": "std",
+        "label": "标准差",
+        "description": "超过平均值上下std的视为异常",
+        "type": "float",
+        "optional": "false"
+      }
+    ]
+  }
+]
